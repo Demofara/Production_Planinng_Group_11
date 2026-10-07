@@ -1,5 +1,5 @@
 library(shiny)
-library(readxl) # Excel okuma kütüphanesi
+library(readxl)
 
 # Arayüz (UI) Fonksiyonu
 moving_average_ui <- function(id) {
@@ -10,7 +10,7 @@ moving_average_ui <- function(id) {
         # Excel dosya yükleme alanı
         fileInput(ns("file"), "Upload an Excel file (.xlsx)", accept = c(".xlsx")),
         
-        # Sütun seçimi (Excel yüklendikten sonra dinamik olarak güncellenecek)
+        # Sütun seçimi
         selectInput(ns("demand_col"), "Demand column", choices = NULL),
         
         # N seçimi için radyo butonları
@@ -21,6 +21,7 @@ moving_average_ui <- function(id) {
         # Manuel seçim paneli
         conditionalPanel(
           condition = sprintf("input['%s'] == 'manual'", ns("n_method")),
+          # Manuel seçimde istenirse N=1 (Naif tahmin) girilebilir, ama minimum 2 de yapılabilir.
           numericInput(ns("n_manual"), "N (number of past periods)", value = 3, min = 1)
         ),
         
@@ -52,9 +53,8 @@ moving_average_server <- function(id) {
     
     # Yüklenen Excel dosyasını oku
     uploaded_data <- reactive({
-      req(input$file) # Dosya yüklenmesini bekle
+      req(input$file)
       
-      # Dosya uzantısını kontrol et
       ext <- tools::file_ext(input$file$name)
       if(ext != "xlsx") {
         validate("Lütfen sadece .xlsx uzantılı bir Excel dosyası yükleyin.")
@@ -69,13 +69,12 @@ moving_average_server <- function(id) {
       updateSelectInput(session, "demand_col", choices = names(df))
     })
     
-    # Seçilen sütuna ait veriyi sayısal bir vektör olarak al
+    # Seçilen sütuna ait veriyi al
     demand_data <- reactive({
       req(uploaded_data(), input$demand_col)
       df <- uploaded_data()
       req(input$demand_col %in% names(df))
       
-      # Veriyi sayısal değere çevirip NA'leri temizleyebilir veya olduğu gibi alabiliriz
       as.numeric(df[[input$demand_col]])
     })
     
@@ -92,13 +91,13 @@ moving_average_server <- function(id) {
       
       error <- forecast - d
       abs_error <- abs(error)
-      eval_idx <- (n + 1):len # Sadece tahmin yapılabilen dönemler
+      eval_idx <- (n + 1):len
       
       if(length(eval_idx) > 0) {
         mad <- mean(abs_error[eval_idx], na.rm = TRUE)
         mse <- mean(error[eval_idx]^2, na.rm = TRUE)
         mape <- mean((abs_error[eval_idx] / d[eval_idx]), na.rm = TRUE) * 100
-        next_f <- mean(d[(len - n + 1):len]) # Bir sonraki dönemin tahmini
+        next_f <- mean(d[(len - n + 1):len])
       } else {
         mad <- NA; mse <- NA; mape <- NA; next_f <- NA
       }
@@ -110,7 +109,7 @@ moving_average_server <- function(id) {
     
     # Seçilen yönteme göre sonuçları hesapla
     results <- reactive({
-      req(demand_data()) # Veri yoksa işlem yapma
+      req(demand_data())
       d <- demand_data()
       req(length(d) > 0)
       
@@ -119,14 +118,14 @@ moving_average_server <- function(id) {
         return(calc_ma(d, n))
       } else {
         # Otomatik optimizasyon
-        max_n <- input$n_max
+        max_n <- max(2, input$n_max) # Güvenlik için max_n en az 2 olmalı
         best_error <- Inf
         best_res <- NULL
         
-        for (i in 1:max_n) {
+        # N=1 OLMAMASI İÇİN DÖNGÜYÜ 2'DEN BAŞLATIYORUZ
+        for (i in 2:max_n) {
           res <- calc_ma(d, i)
           
-          # Hangi metriğin minimize edileceğini seç
           err_val <- switch(input$error_metric,
                             "MAD" = res$mad,
                             "MSE" = res$mse,
